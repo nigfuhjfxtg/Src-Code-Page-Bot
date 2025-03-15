@@ -1,71 +1,71 @@
 const axios = require('axios');
-const { sendMessage } = require('../handles/sendMessage');
+const { sendMessage } = require('./sendMessage');
 
-// كائن لتخزين جلسات لعبة أكيناتور لكل مستخدم
-const sessions = {};
+const akinatorSessions = {};
 
 module.exports = {
   name: 'akinator',
-  description: 'بدء لعبة أكيناتور باستخدام API TILMN AKINATOR',
+  description: 'لعب لعبة أكيناتور',
   usage: 'akinator',
-  author: 'YourName',
+  author: 'coffee',
 
-  // تُمرر sendMessage كمعامل رابع من ملف الهاندل
-  async execute(senderId, args, pageAccessToken, sendMessage) {
+  async execute(senderId, args, pageAccessToken) {
     try {
-      // استدعاء نقطة بدء اللعبة (حدد اللغة "ar" للغة العربية، يمكنك تغييرها إلى "en" أو "fr" حسب الحاجة)
-      const startUrl = 'https://tilmn-akinator-api.onrender.com/api/start?lang=ar';
-      const response = await axios.get(startUrl);
-      const data = response.data;
-      
-      // التأكد من صحة البيانات المستلمة
-      if (!data || !data.question || !data.sessionId) {
-        return await sendMessage(
-          senderId,
-          { text: 'حدث خطأ أثناء بدء اللعبة. يرجى المحاولة مرة أخرى.' },
-          pageAccessToken
-        );
+      // بدء اللعبة إذا لم يكن هناك جلسة
+      if (!akinatorSessions[senderId]) {
+        const response = await axios.get('https://tilmn-akinator-api.onrender.com/api/start?lang=ar');
+        const { session, question } = response.data;
+
+        akinatorSessions[senderId] = session;
+
+        // إرسال السؤال الأول مع الأزرار السريعة
+        return sendAkinatorQuestion(senderId, question, session, pageAccessToken);
       }
-      
-      // تخزين معرف الجلسة للمستخدم
-      sessions[senderId] = {
-        sessionId: data.sessionId
-        // يمكن إضافة معلومات إضافية مثل خطوة اللعبة إذا احتجت لذلك
-      };
 
-      // تعريف الإجابات الممكنة حسب توثيق API:
-      // 0 = نعم، 1 = لا، 2 = لا أعلم، 3 = ربما، 4 = على الأرجح لا
-      const answers = [
-        { label: 'نعم', value: 0 },
-        { label: 'لا', value: 1 },
-        { label: 'لا أعلم', value: 2 },
-        { label: 'ربما', value: 3 },
-        { label: 'على الأرجح لا', value: 4 }
-      ];
-
-      // توليد أزرار Quick Replies لكل إجابة
-      const quickReplies = answers.map(answer => ({
-        content_type: 'text',
-        title: answer.label,
-        // يتم إرسال الـ payload بصيغة "AKINATOR_<sessionId>_<choice>"
-        payload: `AKINATOR_${data.sessionId}_${answer.value}`
-      }));
-
-      // إرسال السؤال الأول للمستخدم مع Quick Replies
-      const messageData = {
-        text: data.question,
-        quick_replies: quickReplies
-      };
-
-      await sendMessage(senderId, messageData, pageAccessToken);
+      sendMessage(senderId, { text: 'أنت تلعب بالفعل! أجب على السؤال أو أرسل "إعادة" لبدء لعبة جديدة.' }, pageAccessToken);
 
     } catch (error) {
-      console.error('Error in akinator command:', error.message);
-      await sendMessage(
-        senderId,
-        { text: 'حدث خطأ أثناء بدء لعبة أكيناتور. يرجى المحاولة لاحقًا.' },
-        pageAccessToken
-      );
+      console.error('خطأ في بدء أكيناتور:', error.message);
+      sendMessage(senderId, { text: 'حدث خطأ أثناء بدء اللعبة. حاول مرة أخرى لاحقًا.' }, pageAccessToken);
     }
   }
 };
+
+// إرسال السؤال مع الأزرار السريعة
+async function sendAkinatorQuestion(senderId, question, sessionId, pageAccessToken) {
+  const quickReplies = [
+    { content_type: 'text', title: 'نعم', payload: `AKINATOR_${sessionId}_0` },
+    { content_type: 'text', title: 'لا', payload: `AKINATOR_${sessionId}_1` },
+    { content_type: 'text', title: 'لا أعلم', payload: `AKINATOR_${sessionId}_2` },
+    { content_type: 'text', title: 'ربما', payload: `AKINATOR_${sessionId}_3` },
+    { content_type: 'text', title: 'على الأرجح لا', payload: `AKINATOR_${sessionId}_4` }
+  ];
+
+  await sendMessage(senderId, { text: question, quick_replies: quickReplies }, pageAccessToken);
+}
+
+// معالجة الردود على الأسئلة
+async function handleAkinatorAnswer(senderId, payload, pageAccessToken) {
+  const parts = payload.split('_');
+  if (parts.length !== 3 || parts[0] !== 'AKINATOR') return;
+
+  const sessionId = parts[1];
+  const choice = parts[2];
+
+  try {
+    const response = await axios.get(`https://tilmn-akinator-api.onrender.com/api/answer?choice=${choice}&session=${sessionId}`);
+    
+    if (response.data.endGame) {
+      delete akinatorSessions[senderId];
+      return sendMessage(senderId, { text: `أعتقد أن الشخصية هي: ${response.data.character}` }, pageAccessToken);
+    }
+
+    sendAkinatorQuestion(senderId, response.data.question, sessionId, pageAccessToken);
+
+  } catch (error) {
+    console.error('خطأ في إرسال الإجابة:', error.message);
+    sendMessage(senderId, { text: 'حدث خطأ أثناء التفاعل مع أكيناتور. حاول مرة أخرى.' }, pageAccessToken);
+  }
+}
+
+module.exports.handleAkinatorAnswer = handleAkinatorAnswer;
