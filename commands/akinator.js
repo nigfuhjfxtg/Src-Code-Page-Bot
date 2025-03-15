@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { sendMessage } = require('../handles/sendMessage'); // تأكد أن المسار صحيح
+const { sendMessage } = require('../handles/sendMessage'); // تأكد من صحة المسار
 
 const akinatorSessions = {};
 
@@ -11,14 +11,11 @@ module.exports = {
 
   async execute(senderId, args, pageAccessToken) {
     try {
-      // بدء اللعبة إذا لم يكن هناك جلسة
       if (!akinatorSessions[senderId]) {
         const response = await axios.get('https://tilmn-akinator-api.onrender.com/api/start?lang=ar');
         const { session, question } = response.data;
 
         akinatorSessions[senderId] = session;
-
-        // إرسال السؤال الأول مع الأزرار
         return sendAkinatorQuestion(senderId, question, session, pageAccessToken);
       }
 
@@ -31,17 +28,18 @@ module.exports = {
   }
 };
 
-// إرسال السؤال باستخدام Generic Template (يعمل في فيسبوك لايت)
+// إرسال السؤال باستخدام الأزرار أو الردود السريعة حسب نوع الجهاز
 async function sendAkinatorQuestion(senderId, question, sessionId, pageAccessToken) {
-  const elements = [
-    {
-      title: question,
-      buttons: [
-        { type: 'postback', title: 'نعم', payload: `AKINATOR_${sessionId}_0` },
-        { type: 'postback', title: 'لا', payload: `AKINATOR_${sessionId}_1` },
-        { type: 'postback', title: 'لا أعلم', payload: `AKINATOR_${sessionId}_2` }
-      ]
-    }
+  const buttons = [
+    { type: 'postback', title: 'نعم', payload: `AKINATOR_${sessionId}_0` },
+    { type: 'postback', title: 'لا', payload: `AKINATOR_${sessionId}_1` },
+    { type: 'postback', title: 'لا أعلم', payload: `AKINATOR_${sessionId}_2` }
+  ];
+
+  const quickReplies = [
+    { content_type: 'text', title: 'نعم', payload: `AKINATOR_${sessionId}_0` },
+    { content_type: 'text', title: 'لا', payload: `AKINATOR_${sessionId}_1` },
+    { content_type: 'text', title: 'لا أعلم', payload: `AKINATOR_${sessionId}_2` }
   ];
 
   const messageData = {
@@ -49,9 +47,10 @@ async function sendAkinatorQuestion(senderId, question, sessionId, pageAccessTok
       type: 'template',
       payload: {
         template_type: 'generic',
-        elements: elements
+        elements: [{ title: question, buttons: buttons }]
       }
-    }
+    },
+    quick_replies: quickReplies
   };
 
   await sendMessage(senderId, messageData, pageAccessToken);
