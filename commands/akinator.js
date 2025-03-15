@@ -1,25 +1,40 @@
 const axios = require('axios');
-const { sendMessage } = require('../handles/sendMessage'); // تأكد من صحة المسار
+const { sendMessage } = require('../handles/sendMessage');
 
 const akinatorSessions = {};
 
 module.exports = {
   name: 'akinator',
-  description: 'لعب لعبة أكيناتور',
+  description: 'لعب لعبة أكيناتور باستخدام Quick Replies',
   usage: 'akinator',
   author: 'coffee',
 
   async execute(senderId, args, pageAccessToken) {
     try {
+      // إذا لم تبدأ جلسة بعد
       if (!akinatorSessions[senderId]) {
         const response = await axios.get('https://tilmn-akinator-api.onrender.com/api/start?lang=ar');
-        const { session, question } = response.data;
+        
+        // تأكد من شكل البيانات المستلمة:
+        console.log(response.data); 
+        // مثال متوقع: { sessionId: "...", question: "...", progress: 0, ... }
 
-        akinatorSessions[senderId] = session;
-        return sendAkinatorQuestion(senderId, question, session, pageAccessToken);
+        const { sessionId, question, progress } = response.data;
+        if (!sessionId) {
+          return sendMessage(senderId, { text: 'حدث خطأ أثناء بدء اللعبة.' }, pageAccessToken);
+        }
+
+        // حفظ معرّف الجلسة
+        akinatorSessions[senderId] = sessionId;
+
+        // إرسال السؤال الأول
+        return sendAkinatorQuestion(senderId, question, progress, sessionId, pageAccessToken);
       }
 
-      sendMessage(senderId, { text: 'أنت تلعب بالفعل! أجب على السؤال أو أرسل "إعادة" لبدء لعبة جديدة.' }, pageAccessToken);
+      // إذا كانت اللعبة بدأت مسبقًا
+      sendMessage(senderId, {
+        text: 'أنت تلعب بالفعل! أجب على السؤال أو أرسل "إعادة" لبدء لعبة جديدة.'
+      }, pageAccessToken);
 
     } catch (error) {
       console.error('خطأ في بدء أكيناتور:', error.message);
@@ -28,37 +43,35 @@ module.exports = {
   }
 };
 
-// إرسال السؤال باستخدام الأزرار أو الردود السريعة حسب نوع الجهاز
-async function sendAkinatorQuestion(senderId, question, sessionId, pageAccessToken) {
-  const buttons = [
-    { type: 'postback', title: 'نعم', payload: `AKINATOR_${sessionId}_0` },
-    { type: 'postback', title: 'لا', payload: `AKINATOR_${sessionId}_1` },
-    { type: 'postback', title: 'لا أعلم', payload: `AKINATOR_${sessionId}_2` }
-  ];
-
+// دالة لإرسال السؤال باستخدام Quick Replies
+async function sendAkinatorQuestion(senderId, question, progress, sessionId, pageAccessToken) {
+  const textMessage = `🧞‍♂️ | ${question}\n\n📊 التقدم: ${progress}%`;
   const quickReplies = [
-    { content_type: 'text', title: 'نعم', payload: `AKINATOR_${sessionId}_0` },
-    { content_type: 'text', title: 'لا', payload: `AKINATOR_${sessionId}_1` },
-    { content_type: 'text', title: 'لا أعلم', payload: `AKINATOR_${sessionId}_2` }
+    { content_type: 'text', title: 'نعم ✅', payload: `AKINATOR_${sessionId}_0` },
+    { content_type: 'text', title: 'لا ❌', payload: `AKINATOR_${sessionId}_1` },
+    { content_type: 'text', title: 'لا أعلم 🤔', payload: `AKINATOR_${sessionId}_2` },
+    { content_type: 'text', title: 'ربما 🤷', payload: `AKINATOR_${sessionId}_3` },
+    { content_type: 'text', title: 'على الأرجح لا 🚫', payload: `AKINATOR_${sessionId}_4` },
+    { content_type: 'text', title: 'إنهاء اللعبة 🔚', payload: `AKINATOR_END` }
   ];
 
-  const messageData = {
-    attachment: {
-      type: 'template',
-      payload: {
-        template_type: 'generic',
-        elements: [{ title: question, buttons: buttons }]
-      }
-    },
+  await sendMessage(senderId, {
+    text: textMessage,
     quick_replies: quickReplies
-  };
-
-  await sendMessage(senderId, messageData, pageAccessToken);
+  }, pageAccessToken);
 }
 
-// معالجة الردود على الأسئلة
+// دالة لمعالجة إجابات المستخدم
 async function handleAkinatorAnswer(senderId, payload, pageAccessToken) {
+  // إذا اختار المستخدم إنهاء اللعبة
+  if (payload === 'AKINATOR_END') {
+    delete akinatorSessions[senderId];
+    return sendMessage(senderId, { text: 'تم إنهاء اللعبة.' }, pageAccessToken);
+  }
+
   const parts = payload.split('_');
+  // مثال على الـpayload: "AKINATOR_abc123_0"
+  // parts[0] = "AKINATOR", parts[1] = sessionId, parts[2] = choice
   if (parts.length !== 3 || parts[0] !== 'AKINATOR') return;
 
   const sessionId = parts[1];
@@ -66,13 +79,17 @@ async function handleAkinatorAnswer(senderId, payload, pageAccessToken) {
 
   try {
     const response = await axios.get(`https://tilmn-akinator-api.onrender.com/api/answer?choice=${choice}&session=${sessionId}`);
-    
+    console.log(response.data);
+
+    // إذا انتهت اللعبة
     if (response.data.endGame) {
       delete akinatorSessions[senderId];
-      return sendMessage(senderId, { text: `أعتقد أن الشخصية هي: ${response.data.character}` }, pageAccessToken);
+      return sendMessage(senderId, { text: `🤖 أعتقد أن الشخصية هي: ${response.data.character}` }, pageAccessToken);
     }
 
-    sendAkinatorQuestion(senderId, response.data.question, sessionId, pageAccessToken);
+    // استمر في طرح الأسئلة
+    const { question, progress } = response.data;
+    await sendAkinatorQuestion(senderId, question, progress, sessionId, pageAccessToken);
 
   } catch (error) {
     console.error('خطأ في إرسال الإجابة:', error.message);
