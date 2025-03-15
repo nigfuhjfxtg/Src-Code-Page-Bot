@@ -7,113 +7,115 @@ let commandCache = null;
 function loadCommands() {
   try {
     const commandsDir = path.join(__dirname, '../commands');
-    const commandFiles = fs.readdirSync(commandsDir).filter(file => file.endsWith('.js'));
+    if (!fs.existsSync(commandsDir)) {
+      console.error('[ERROR] Commands directory not found!');
+      return [];
+    }
     
-    commandCache = commandFiles.map(file => {
+    const commandFiles = fs.readdirSync(commandsDir)
+      .filter(file => file.endsWith('.js') && !file.startsWith('_'));
+
+    commandCache = commandFiles.reduce((acc, file) => {
       try {
         const command = require(path.join(commandsDir, file));
-        if (!command.name || !command.description) {
-          console.warn(`[WARN] Command ${file} is missing required fields`);
-          return null;
+        if (command.name && command.description) {
+          acc.push(command);
+        } else {
+          console.warn(`[WARNING] Invalid command in file: ${file}`);
         }
-        return command;
       } catch (error) {
-        console.error(`[ERROR] Failed to load command ${file}:`, error);
-        return null;
+        console.error(`[ERROR] Failed to load ${file}:`, error.message);
       }
-    }).filter(Boolean);
-    
-    console.log(`[INFO] Loaded ${commandCache.length} commands`);
+      return acc;
+    }, []);
+
+    console.log(`[SUCCESS] Loaded ${commandCache.length} commands`);
+    return commandCache;
   } catch (error) {
-    console.error('[CRITICAL] Failed to load commands:', error);
-    commandCache = [];
+    console.error('[CRITICAL] Command loader failed:', error);
+    return [];
   }
 }
 
 module.exports = {
   name: 'help',
-  description: 'عرض الأوامر كأزرار تفاعلية',
-  usage: 'help\nhelp [اسم الأمر]',
+  description: 'عرض الأوامر مع أزرار تفاعلية',
+  usage: 'help',
   author: 'System',
   execute(senderId, args, pageAccessToken) {
-    // التحميل الأولي للأوامر
-    if (!commandCache) {
-      loadCommands();
-      if (commandCache.length === 0) {
-        return sendMessage(senderId, { 
-          text: '⚠️ تعذر تحميل الأوامر، الرجاء المحاولة لاحقاً.' 
-        }, pageAccessToken);
-      }
+    // التحميل الأولي مع التحقق من وجود الأوامر
+    if (!commandCache || commandCache.length === 0) {
+      commandCache = loadCommands();
     }
 
-    // حالة طلب أمر معين
-    if (args.length > 0) {
-      const [commandName, page] = args[0].toLowerCase().split('|');
-      const command = commandCache.find(c => c.name.toLowerCase() === commandName);
-
-      if (command) {
-        const response = {
-          text: `🎯 **${command.name}**\n📝 ${command.description}\n⚡ الاستخدام: ${command.usage || 'لا يوجد'}`,
-          quick_replies: [
-            {
-              content_type: 'text',
-              title: '🔙 الرجوع',
-              payload: 'HELP_MAIN',
-            }
-          ]
-        };
-        return sendMessage(senderId, response, pageAccessToken);
-      }
+    // حالة عدم وجود أوامر
+    if (commandCache.length === 0) {
+      return sendMessage(senderId, {
+        text: '⚠️ لا توجد أوامر متاحة حالياً!'
+      }, pageAccessToken);
     }
 
-    // إنشاء الأزرار الأساسية مع ترقيم الصفحات
-    const MAX_BUTTONS = 10;
-    const totalPages = Math.ceil(commandCache.length / MAX_BUTTONS);
+    // معالجة طلب صفحة معينة
     const currentPage = parseInt(args[1]) || 1;
+    const ITEMS_PER_PAGE = 7;
+    const totalPages = Math.ceil(commandCache.length / ITEMS_PER_PAGE);
     
-    const paginatedCommands = commandCache.slice(
-      (currentPage - 1) * MAX_BUTTONS,
-      currentPage * MAX_BUTTONS
-    );
+    // استخراج الأوامر للصفحة الحالية
+    const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIdx = startIdx + ITEMS_PER_PAGE;
+    const pageCommands = commandCache.slice(startIdx, endIdx);
 
-    const quickReplies = paginatedCommands.map(cmd => ({
+    // إنشاء الأزرار الأساسية
+    const quickReplies = pageCommands.map(cmd => ({
       content_type: 'text',
-      title: `📌 ${cmd.name}`,
-      payload: `HELP_${cmd.name.toUpperCase()}`,
+      title: `🔹 ${cmd.name}`, // إضافة رمز قبل اسم الأمر
+      payload: `HELP_CMD_${cmd.name.toUpperCase()}`
     }));
 
     // أزرار التنقل بين الصفحات
     if (totalPages > 1) {
       if (currentPage > 1) {
-        quickReplies.push({
+        quickReplies.unshift({
           content_type: 'text',
-          title: '◀️ الصفحة السابقة',
-          payload: `HELP_PAGE|${currentPage - 1}`,
+          title: '⏪ الصفحة السابقة',
+          payload: `HELP_PAGE_${currentPage - 1}`
         });
       }
       
       if (currentPage < totalPages) {
         quickReplies.push({
           content_type: 'text',
-          title: '▶️ الصفحة التالية',
-          payload: `HELP_PAGE|${currentPage + 1}`,
+          title: '⏩ الصفحة التالية',
+          payload: `HELP_PAGE_${currentPage + 1}`
         });
       }
     }
 
-    // إضافة زر الإغلاق
-    quickReplies.push({
-      content_type: 'text',
-      title: '❌ إغلاق',
-      payload: 'HELP_CLOSE',
-    });
+    // إضافة زر المساعدة والإغلاق
+    quickReplies.push(
+      {
+        content_type: 'text',
+        title: '❔ مساعدة',
+        payload: 'GENERAL_HELP'
+      },
+      {
+        content_type: 'text',
+        title: '❌ إغلاق',
+        payload: 'CLOSE_HELP'
+      }
+    );
 
-    // إرسال الرسالة الرئيسية
-    const message = {
-      text: `📜 **القائمة الرئيسية - الصفحة ${currentPage}/${totalPages}**\n▸ اختر الأمر المطلوب:`,
-      quick_replies: quickReplies
-    };
-
-    sendMessage(senderId, message, pageAccessToken);
+    // إرسال الرسالة مع التحقق النهائي
+    if (quickReplies.length > 0) {
+      sendMessage(senderId, {
+        text: `📂 **الأوامر المتاحة - الصفحة ${currentPage}/${totalPages}**\n` +
+              '▸ اختر أحد الأوامر:',
+        quick_replies: quickReplies.slice(0, 11) // الحد الأقصى لعدد الأزرار
+      }, pageAccessToken);
+    } else {
+      sendMessage(senderId, {
+        text: '⚠️ حدث خطأ غير متوقع في تحميل الأوامر!'
+      }, pageAccessToken);
+    }
   }
 };
