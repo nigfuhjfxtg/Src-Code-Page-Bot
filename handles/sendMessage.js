@@ -1,4 +1,3 @@
-const sendMessage = async (senderId, { text = '', attachment = null }, pageAccessToken) => {
 const axios = require('axios');
 const path = require('path');
 
