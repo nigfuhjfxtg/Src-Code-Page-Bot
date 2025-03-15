@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { sendMessage } = require('../handles/sendMessage'); // تأكد من المسار الصحيح
+const { sendMessage } = require('../handles/sendMessage'); // تأكد أن المسار صحيح
 
 const akinatorSessions = {};
 
@@ -14,15 +14,12 @@ module.exports = {
       // بدء اللعبة إذا لم يكن هناك جلسة
       if (!akinatorSessions[senderId]) {
         const response = await axios.get('https://tilmn-akinator-api.onrender.com/api/start?lang=ar');
-        console.log(response.data); // فحص بيانات الجلسة
-        
-        const { sessionId, question } = response.data;
-        if (!sessionId) {
-          return sendMessage(senderId, { text: 'حدث خطأ أثناء بدء اللعبة. حاول لاحقًا.' }, pageAccessToken);
-        }
+        const { session, question } = response.data;
 
-        akinatorSessions[senderId] = sessionId;
-        return sendAkinatorQuestion(senderId, question, sessionId, pageAccessToken);
+        akinatorSessions[senderId] = session;
+
+        // إرسال السؤال الأول مع الأزرار
+        return sendAkinatorQuestion(senderId, question, session, pageAccessToken);
       }
 
       sendMessage(senderId, { text: 'أنت تلعب بالفعل! أجب على السؤال أو أرسل "إعادة" لبدء لعبة جديدة.' }, pageAccessToken);
@@ -34,23 +31,25 @@ module.exports = {
   }
 };
 
-// إرسال السؤال مع أزرار القوائم
+// إرسال السؤال باستخدام Generic Template (يعمل في فيسبوك لايت)
 async function sendAkinatorQuestion(senderId, question, sessionId, pageAccessToken) {
-  const buttons = [
-    { type: 'postback', title: 'نعم', payload: `AKINATOR_${sessionId}_0` },
-    { type: 'postback', title: 'لا', payload: `AKINATOR_${sessionId}_1` },
-    { type: 'postback', title: 'لا أعلم', payload: `AKINATOR_${sessionId}_2` },
-    { type: 'postback', title: 'ربما', payload: `AKINATOR_${sessionId}_3` },
-    { type: 'postback', title: 'على الأرجح لا', payload: `AKINATOR_${sessionId}_4` }
+  const elements = [
+    {
+      title: question,
+      buttons: [
+        { type: 'postback', title: 'نعم', payload: `AKINATOR_${sessionId}_0` },
+        { type: 'postback', title: 'لا', payload: `AKINATOR_${sessionId}_1` },
+        { type: 'postback', title: 'لا أعلم', payload: `AKINATOR_${sessionId}_2` }
+      ]
+    }
   ];
 
   const messageData = {
     attachment: {
       type: 'template',
       payload: {
-        template_type: 'button',
-        text: question,
-        buttons: buttons.slice(0, 3) // لا يمكن إرسال أكثر من 3 أزرار دفعة واحدة
+        template_type: 'generic',
+        elements: elements
       }
     }
   };
