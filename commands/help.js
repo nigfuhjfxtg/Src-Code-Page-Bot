@@ -1,76 +1,137 @@
+const fs = require('fs');
+const path = require('path');
 const { sendMessage } = require('../handles/sendMessage');
 
-// 1. قائمة الأوامر اليدوية
-const manualCommands = [
-  {
-    name: "بينج",
-    description: "فحص سرعة البوت",
-    usage: "بينج",
-    author: "النظام"
-  },
-  {
-    name: "الطقس",
-    description: "معرفة حالة الطقس",
-    usage: "الطقس [المدينة]",
-    author: "فريق الأرصاد"
-  },
-  {
-    name: "حساب",
-    description: "إجراء عمليات حسابية",
-    usage: "حساب <عملية> <رقم1> <رقم2>",
-    author: "فريق الرياضيات"
+// تخزين مؤقت للأوامر
+let commandCache = null;
+
+// دالة لتحميل الأوامر مع معالجة الأخطاء
+function loadCommands() {
+  const commandsDir = path.join(__dirname, '../commands');
+  
+  try {
+    // التحقق من وجود مجلد الأوامر
+    if (!fs.existsSync(commandsDir)) {
+      throw new Error('Commands directory not found!');
+    }
+
+    // قراءة الملفات مع تصفية الملفات المخفية
+    const commandFiles = fs.readdirSync(commandsDir)
+      .filter(file => file.endsWith('.js') && !file.startsWith('_'));
+
+    // تحميل الأوامر والتحقق من صحة الحقول الأساسية
+    commandCache = commandFiles.map(file => {
+      try {
+        const command = require(path.join(commandsDir, file));
+        
+        if (!command.name || !command.description) {
+          console.warn(`Invalid command in file: ${file}`);
+          return null;
+        }
+        
+        return command;
+      } catch (error) {
+        console.error(`Failed to load ${file}:`, error.message);
+        return null;
+      }
+    }).filter(Boolean);
+    
+  } catch (error) {
+    console.error('Critical error:', error.message);
+    commandCache = [];
   }
-];
+}
 
 module.exports = {
-  name: 'مساعدة',
-  description: 'عرض الأوامر المضافة يدويًا',
-  usage: 'مساعدة [اسم الأمر]',
-  author: 'المطور',
+  name: 'help',
+  description: 'عرض الأوامر المتاحة مع تفاصيلها',
+  usage: 'help [اسم الأمر] [رقم الصفحة]',
+  author: 'System',
   execute(senderId, args, pageAccessToken) {
-    
-    // 2. حالة طلب أمر معين
-    if (args.length > 0) {
-      const cmdName = args[0].toLowerCase();
-      const command = manualCommands.find(c => c.name.toLowerCase() === cmdName);
+    // تحميل الأوامر إذا لم تكن محملة مسبقاً
+    if (!commandCache) loadCommands();
+
+    // في حالة طلب تفاصيل أمر معين
+    if (args.length > 0 && args[0].toLowerCase() !== 'page') {
+      const commandName = args[0].toLowerCase();
+      const command = commandCache.find(c => c.name.toLowerCase() === commandName);
       
       if (command) {
         const response = `
-⚙️ **${command.name}**
+🛠️ **${command.name}**
 📝 ${command.description}
-🔧 الاستخدام: \`${command.usage}\`
-👤 المطور: ${command.author}`;
+⚡ الاستخدام: ${command.usage || 'لا يوجد'}
+
+🔍 ${command.author ? `المطور: ${command.author}` : ''}`;
         
         return sendMessage(senderId, { text: response }, pageAccessToken);
       }
-      return sendMessage(senderId, { text: "⚠️ هذا الأمر غير موجود!" }, pageAccessToken);
+      return sendMessage(senderId, { text: '⚠️ الأمر غير موجود!' }, pageAccessToken);
     }
 
-    // 3. إنشاء أزرار للأوامر الأساسية
-    const quickReplies = manualCommands.map(cmd => ({
-      content_type: 'text',
-      title: `🎮 ${cmd.name}`,
-      payload: `HELP_${cmd.name.replace(/\s/g, '_')}` // استبدال المسافات بشرطات
-    }));
+    // إعداد عرض قائمة الأوامر باستخدام قالب generic
+    const ITEMS_PER_PAGE = 8;
+    const totalPages = Math.ceil(commandCache.length / ITEMS_PER_PAGE) || 1;
+    const currentPage = Math.min(parseInt(args[1]) || 1, totalPages);
 
-    // 4. إضافة أزرار إضافية
-    quickReplies.push(
-      {
-        content_type: 'text',
-        title: '❌ إغلاق',
-        payload: 'CLOSE_HELP'
-      },
-      {
-        content_type: 'text',
-        title: '📞 الدعم',
-        payload: 'CONTACT_SUPPORT'
+    // توليد أزرار الأوامر للصفحة الحالية
+    const commandButtons = commandCache
+      .slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE)
+      .map(cmd => ({
+        type: 'postback',
+        title: `📌 ${cmd.name}`,
+        payload: `HELP_${cmd.name}`
+      }));
+
+    // توليد أزرار التنقل بين الصفحات إذا لزم الأمر
+    const navButtons = [];
+    if (totalPages > 1) {
+      if (currentPage > 1) {
+        navButtons.push({
+          type: 'postback',
+          title: '⏪ السابق',
+          payload: `HELP_PAGE_${currentPage - 1}`
+        });
       }
-    );
+      if (currentPage < totalPages) {
+        navButtons.push({
+          type: 'postback',
+          title: '⏩ التالي',
+          payload: `HELP_PAGE_${currentPage + 1}`
+        });
+      }
+    }
 
-    // 5. إرسال الرسالة النهائية
-    sendMessage(senderId, {
-      text: "📜 **قائمة الأوامر الرئيسية**\n▸ اختر أحد الأوامر:",
-      quick_replies: quickReplies.slice(0, 11) // الحد الأقصى للأزرار
-    }, pageAccessToken);
+    // بناء عناصر الرسالة للقالب generic
+    const elements = [];
+    if (commandButtons.length > 0) {
+      elements.push({
+        title: 'قائمة الأوامر',
+        subtitle: `اختر الأمر الذي تريده (صفحة ${currentPage}/${totalPages})`,
+        image_url: 'https://i.ibb.co/dJzSv5Q/pagebot.jpg',
+        buttons: commandButtons
+      });
+    }
+    if (navButtons.length > 0) {
+      elements.push({
+        title: 'تنقل بين الصفحات',
+        subtitle: `الصفحة ${currentPage} من ${totalPages}`,
+        buttons: navButtons
+      });
+    }
+    
+    // إعداد رسالة القالب مع المرفق (attachment)
+    const messageData = {
+      attachment: {
+        type: 'template',
+        payload: {
+          template_type: 'generic',
+          elements: elements
+        }
+      }
+    };
+
+    // إرسال الرسالة إلى المستخدم
+    sendMessage(senderId, messageData, pageAccessToken);
   }
 };
