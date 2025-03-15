@@ -5,7 +5,7 @@ const { sendMessage } = require('./sendMessage');
 const commands = new Map();
 const prefix = '-';
 
-// Load command modules
+// تحميل الأوامر
 fs.readdirSync(path.join(__dirname, '../commands'))
   .filter(file => file.endsWith('.js'))
   .forEach(file => {
@@ -26,13 +26,13 @@ async function handleMessage(event, pageAccessToken) {
 
   try {
     if (commands.has(commandName.toLowerCase())) {
-      await commands.get(commandName.toLowerCase()).execute(senderId, args, pageAccessToken, sendMessage);
+      await commands.get(commandName.toLowerCase()).execute(senderId, args, pageAccessToken);
     } else {
       await commands.get('gpt4').execute(senderId, [messageText], pageAccessToken);
     }
   } catch (error) {
     console.error(`Error executing command:`, error);
-    await sendMessage(senderId, { text: error.message || 'There was an error executing that command.' }, pageAccessToken);
+    await sendMessage(senderId, { text: error.message || 'حدث خطأ أثناء تنفيذ الأمر.' }, pageAccessToken);
   }
 }
 
