@@ -1,3 +1,6 @@
+const axios = require('axios');
+const { sendMessage } = require('../handles/sendMessage');
+
 // تعريف كائن لتخزين المحادثات
 const conversations = {};
 
@@ -10,7 +13,7 @@ module.exports = {
   async execute(senderId, args, pageAccessToken) {
     const prompt = args.join(' ');
     if (!prompt) {
-      return sendMessage(senderId, { text: "استخدام: gpt4 <سؤالك>" }, pageAccessToken);
+      return await sendMessage(senderId, { text: "استخدام: gpt4 <سؤالك>" }, pageAccessToken);
     }
 
     // استرجاع المحادثة أو إنشاء جديدة للمستخدم
@@ -43,9 +46,9 @@ module.exports = {
       userMessages.push({ role: 'bot', content: botResponse });
 
       // تحديث المحادثة في الكائن الجلوبال
-      conversations[senderId] = userMessages;
+      conversations[senderId] = userMessages.slice(-10); 
 
-      sendMessage(senderId, { text: botResponse }, pageAccessToken);
+      await sendMessage(senderId, { text: botResponse }, pageAccessToken);
 
     } catch (error) {
       console.error('خطأ في الاتصال بالخادم:', error.message);
@@ -55,7 +58,7 @@ module.exports = {
         errorMessage = "انتهت مهلة الطلب. يرجى إعادة المحاولة بطلب أقصر.";
       }
 
-      sendMessage(senderId, { text: errorMessage }, pageAccessToken);
+      await sendMessage(senderId, { text: errorMessage }, pageAccessToken);
     }
   }
 };
