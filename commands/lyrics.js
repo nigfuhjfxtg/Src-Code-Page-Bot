@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { sendMessage } = require('./sendMessage');
+const { sendMessage } = require('../handles/sendMessage');
 
 const akinatorSessions = {};
 
