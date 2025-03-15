@@ -5,53 +5,34 @@ const { sendMessage } = require('./sendMessage');
 const commands = new Map();
 const prefix = '-';
 
-// تحميل الأوامن من المجلد
-const loadCommands = () => {
-  fs.readdirSync(path.join(__dirname, '../commands'))
-    .filter(file => file.endsWith('.js'))
-    .forEach(file => {
-      const command = require(`../commands/${file}`);
-      commands.set(command.name.toLowerCase(), command);
-    });
-};
-loadCommands(); // التحميل الأولي
+// Load command modules
+fs.readdirSync(path.join(__dirname, '../commands'))
+  .filter(file => file.endsWith('.js'))
+  .forEach(file => {
+    const command = require(`../commands/${file}`);
+    commands.set(command.name.toLowerCase(), command);
+  });
 
 async function handleMessage(event, pageAccessToken) {
   const senderId = event?.sender?.id;
-  if (!senderId) return;
+  if (!senderId) return console.error('Invalid event object');
 
   const messageText = event?.message?.text?.trim();
-  if (!messageText) return;
+  if (!messageText) return console.log('Received event without message text');
 
-  // حالة طلب الأمر help
-  if (messageText.toLowerCase() === prefix + 'help') {
-    const quickReplies = Array.from(commands.values()).map(cmd => ({
-      content_type: 'text',
-      title: `🎮 ${cmd.name}`,
-      payload: `CMD_${cmd.name.toUpperCase()}`
-    }));
-
-    await sendMessage(senderId, {
-      text: '📚 **الأوامر المتاحة:**',
-      quick_replies: quickReplies.slice(0, 11) // 11 زر كحد أقصى
-    }, pageAccessToken);
-    return;
-  }
-
-  // معالجة الأوامر الأخرى...
   const [commandName, ...args] = messageText.startsWith(prefix)
     ? messageText.slice(prefix.length).split(' ')
     : messageText.split(' ');
 
   try {
     if (commands.has(commandName.toLowerCase())) {
-      await commands.get(commandName.toLowerCase()).execute(senderId, args, pageAccessToken);
+      await commands.get(commandName.toLowerCase()).execute(senderId, args, pageAccessToken, sendMessage);
     } else {
       await commands.get('gpt4').execute(senderId, [messageText], pageAccessToken);
     }
   } catch (error) {
-    console.error(`Error:`, error);
-    await sendMessage(senderId, { text: '⚠️ خطأ في تنفيذ الأمر!' }, pageAccessToken);
+    console.error(`Error executing command:`, error);
+    await sendMessage(senderId, { text: error.message || 'There was an error executing that command.' }, pageAccessToken);
   }
 }
 
