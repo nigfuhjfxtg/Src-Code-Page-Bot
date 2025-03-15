@@ -1,29 +1,45 @@
-const { sendMessage } = require('./sendMessage');
-const { handleAkinatorResponse } = require('../commands/akinator');
+const axios = require('axios');
+const path = require('path');
 
-const handlePostback = async (event, pageAccessToken) => {
-  const senderId = event?.sender?.id;
-  // التقاط الـ payload سواء من postback أو quick_reply
-  const payload = event.postback?.payload || event.message?.quick_reply?.payload;
+const axiosPost = (url, data, params = {}) =>
+  axios.post(url, data, { params }).then(res => res.data);
 
-  if (!senderId || !payload) {
-    console.error('Invalid postback event or missing payload.');
-    return;
-  }
+const sendMessage = async (senderId, { text = '', attachment = null, quickReplies = [] }, pageAccessToken) => {
+  if (!text && !attachment) return;
+
+  const url = `https://graph.facebook.com/v21.0/me/messages`;
+  const params = { access_token: pageAccessToken };
 
   try {
-    // إذا كان الـ payload يبدأ بـ "AKINATOR", نمرره مباشرةً لمعالجة رد أكيناتور
-    if (payload.startsWith("AKINATOR")) {
-      await handleAkinatorResponse(senderId, payload, pageAccessToken);
-      return;
+    await axiosPost(url, { recipient: { id: senderId }, sender_action: "typing_on" }, params);
+
+    const messagePayload = {
+      recipient: { id: senderId },
+      message: {}
+    };
+
+    if (text) {
+      messagePayload.message.text = text;
     }
 
-    // في حال payload غير مرتبط بأكيناتور، إرسال رد افتراضي:
-    await sendMessage(senderId, { text: `You sent a postback with payload: ${payload}` }, pageAccessToken);
-  } catch (err) {
-    console.error('Error handling postback:', err.message || err);
-    await sendMessage(senderId, { text: 'Error handling your postback.' }, pageAccessToken);
+    if (quickReplies.length > 0) {
+      messagePayload.message.quick_replies = quickReplies.map(reply => ({
+        content_type: "text",
+        title: reply.title,
+        payload: reply.payload
+      }));
+    }
+
+    if (attachment) {
+      messagePayload.message.attachment = attachment;
+    }
+
+    await axiosPost(url, messagePayload, params);
+    await axiosPost(url, { recipient: { id: senderId }, sender_action: "typing_off" }, params);
+  } catch (e) {
+    const errorMessage = e.response?.data?.error?.message || e.message;
+    console.error(`Error in ${path.basename(__filename)}: ${errorMessage}`);
   }
 };
 
-module.exports = { handlePostback };
+module.exports = { sendMessage };
