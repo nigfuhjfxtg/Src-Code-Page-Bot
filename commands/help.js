@@ -2,82 +2,94 @@ const fs = require('fs');
 const path = require('path');
 const { sendMessage } = require('../handles/sendMessage');
 
+// 1. إنشاء تخزين مؤقت للأوامر
 let commandCache = null;
 
+// 2. دالة لتحميل الأوامر مع معالجة الأخطاء
 function loadCommands() {
+  const commandsDir = path.join(__dirname, '../commands');
+  
   try {
-    const commandsDir = path.join(__dirname, '../commands');
+    // 3. التحقق من وجود المجلد
     if (!fs.existsSync(commandsDir)) {
-      console.error('[ERROR] Commands directory not found!');
-      return [];
+      throw new Error('Commands directory not found!');
     }
-    
+
+    // 4. قراءة الملفات مع تصفية الملفات المخفية
     const commandFiles = fs.readdirSync(commandsDir)
       .filter(file => file.endsWith('.js') && !file.startsWith('_'));
 
-    commandCache = commandFiles.reduce((acc, file) => {
+    // 5. تحميل الأوامر مع التعامل مع الأخطاء
+    commandCache = commandFiles.map(file => {
       try {
         const command = require(path.join(commandsDir, file));
-        if (command.name && command.description) {
-          acc.push(command);
-        } else {
-          console.warn(`[WARNING] Invalid command in file: ${file}`);
+        
+        // 6. التحقق من الحقول الأساسية
+        if (!command.name || !command.description) {
+          console.warn(`Invalid command in file: ${file}`);
+          return null;
         }
+        
+        return command;
       } catch (error) {
-        console.error(`[ERROR] Failed to load ${file}:`, error.message);
+        console.error(`Failed to load ${file}:`, error.message);
+        return null;
       }
-      return acc;
-    }, []);
-
-    console.log(`[SUCCESS] Loaded ${commandCache.length} commands`);
-    return commandCache;
+    }).filter(Boolean); // 7. إزالة الأوامر الفاشلة
+    
   } catch (error) {
-    console.error('[CRITICAL] Command loader failed:', error);
-    return [];
+    console.error('Critical error:', error.message);
+    commandCache = [];
   }
 }
 
 module.exports = {
   name: 'help',
-  description: 'عرض الأوامر مع أزرار تفاعلية',
-  usage: 'help',
+  description: 'عرض الأوامر المتاحة مع تفاصيلها',
+  usage: 'help [اسم الأمر]',
   author: 'System',
   execute(senderId, args, pageAccessToken) {
-    // التحميل الأولي مع التحقق من وجود الأوامر
-    if (!commandCache || commandCache.length === 0) {
-      commandCache = loadCommands();
+    // 8. تحميل الأوامر إذا لم يتم تحميلها مسبقًا
+    if (!commandCache) loadCommands();
+
+    // 9. معالجة طلب أمر معين
+    if (args.length > 0) {
+      const commandName = args[0].toLowerCase();
+      const command = commandCache.find(c => c.name.toLowerCase() === commandName);
+
+      if (command) {
+        const response = `
+🛠️ **${command.name}**
+📝 ${command.description}
+⚡ الاستخدام: ${command.usage || 'لا يوجد'}
+
+🔍 ${command.author ? `المطور: ${command.author}` : ''}`;
+
+        return sendMessage(senderId, { text: response }, pageAccessToken);
+      }
+      return sendMessage(senderId, { text: '⚠️ الأمر غير موجود!' }, pageAccessToken);
     }
 
-    // حالة عدم وجود أوامر
-    if (commandCache.length === 0) {
-      return sendMessage(senderId, {
-        text: '⚠️ لا توجد أوامر متاحة حالياً!'
-      }, pageAccessToken);
-    }
-
-    // معالجة طلب صفحة معينة
-    const currentPage = parseInt(args[1]) || 1;
-    const ITEMS_PER_PAGE = 7;
+    // 10. إنشاء قائمة الأوامر مع الترقيم
+    const ITEMS_PER_PAGE = 8;
     const totalPages = Math.ceil(commandCache.length / ITEMS_PER_PAGE);
-    
-    // استخراج الأوامر للصفحة الحالية
-    const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
-    const endIdx = startIdx + ITEMS_PER_PAGE;
-    const pageCommands = commandCache.slice(startIdx, endIdx);
+    const currentPage = Math.min(parseInt(args[1]) || 1, totalPages);
 
-    // إنشاء الأزرار الأساسية
-    const quickReplies = pageCommands.map(cmd => ({
-      content_type: 'text',
-      title: `🔹 ${cmd.name}`, // إضافة رمز قبل اسم الأمر
-      payload: `HELP_CMD_${cmd.name.toUpperCase()}`
-    }));
+    // 11. توليد الأزرار التفاعلية
+    const quickReplies = commandCache
+      .slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE)
+      .map(cmd => ({
+        content_type: 'text',
+        title: `📌 ${cmd.name}`,
+        payload: `HELP_${cmd.name}`
+      }));
 
-    // أزرار التنقل بين الصفحات
+    // 12. إضافة أزرار التنقل بين الصفحات
     if (totalPages > 1) {
       if (currentPage > 1) {
         quickReplies.unshift({
           content_type: 'text',
-          title: '⏪ الصفحة السابقة',
+          title: '⏪ السابق',
           payload: `HELP_PAGE_${currentPage - 1}`
         });
       }
@@ -85,37 +97,17 @@ module.exports = {
       if (currentPage < totalPages) {
         quickReplies.push({
           content_type: 'text',
-          title: '⏩ الصفحة التالية',
+          title: '⏩ التالي',
           payload: `HELP_PAGE_${currentPage + 1}`
         });
       }
     }
 
-    // إضافة زر المساعدة والإغلاق
-    quickReplies.push(
-      {
-        content_type: 'text',
-        title: '❔ مساعدة',
-        payload: 'GENERAL_HELP'
-      },
-      {
-        content_type: 'text',
-        title: '❌ إغلاق',
-        payload: 'CLOSE_HELP'
-      }
-    );
-
-    // إرسال الرسالة مع التحقق النهائي
-    if (quickReplies.length > 0) {
-      sendMessage(senderId, {
-        text: `📂 **الأوامر المتاحة - الصفحة ${currentPage}/${totalPages}**\n` +
-              '▸ اختر أحد الأوامر:',
-        quick_replies: quickReplies.slice(0, 11) // الحد الأقصى لعدد الأزرار
-      }, pageAccessToken);
-    } else {
-      sendMessage(senderId, {
-        text: '⚠️ حدث خطأ غير متوقع في تحميل الأوامر!'
-      }, pageAccessToken);
-    }
+    // 13. إرسال الرسالة النهائية
+    sendMessage(senderId, {
+      text: `📚 **الأوامر المتاحة (الصفحة ${currentPage}/${totalPages})**\n` +
+            '▸ اختر أحد الأوامر:',
+      quick_replies: quickReplies.slice(0, 11) // الحد الأقصى لعدد الأزرار
+    }, pageAccessToken);
   }
 };
