@@ -1,39 +1,29 @@
-const fs = require('fs');
-const path = require('path');
 const { sendMessage } = require('./sendMessage');
+const { handleAkinatorResponse } = require('../commands/akinator');
 
-const commands = new Map();
-const prefix = '-';
-
-// تحميل الأوامر
-fs.readdirSync(path.join(__dirname, '../commands'))
-  .filter(file => file.endsWith('.js'))
-  .forEach(file => {
-    const command = require(`../commands/${file}`);
-    commands.set(command.name.toLowerCase(), command);
-  });
-
-async function handleMessage(event, pageAccessToken) {
+const handlePostback = async (event, pageAccessToken) => {
   const senderId = event?.sender?.id;
-  if (!senderId) return console.error('Invalid event object');
+  // التقاط الـ payload سواء من postback أو quick_reply
+  const payload = event.postback?.payload || event.message?.quick_reply?.payload;
 
-  const messageText = event?.message?.text?.trim();
-  if (!messageText) return console.log('Received event without message text');
-
-  const [commandName, ...args] = messageText.startsWith(prefix)
-    ? messageText.slice(prefix.length).split(' ')
-    : messageText.split(' ');
+  if (!senderId || !payload) {
+    console.error('Invalid postback event or missing payload.');
+    return;
+  }
 
   try {
-    if (commands.has(commandName.toLowerCase())) {
-      await commands.get(commandName.toLowerCase()).execute(senderId, args, pageAccessToken);
-    } else {
-      await commands.get('gpt4').execute(senderId, [messageText], pageAccessToken);
+    // إذا كان الـ payload يبدأ بـ "AKINATOR", نمرره مباشرةً لمعالجة رد أكيناتور
+    if (payload.startsWith("AKINATOR")) {
+      await handleAkinatorResponse(senderId, payload, pageAccessToken);
+      return;
     }
-  } catch (error) {
-    console.error(`Error executing command:`, error);
-    await sendMessage(senderId, { text: error.message || 'حدث خطأ أثناء تنفيذ الأمر.' }, pageAccessToken);
-  }
-}
 
-module.exports = { handleMessage };
+    // في حال payload غير مرتبط بأكيناتور، إرسال رد افتراضي:
+    await sendMessage(senderId, { text: `You sent a postback with payload: ${payload}` }, pageAccessToken);
+  } catch (err) {
+    console.error('Error handling postback:', err.message || err);
+    await sendMessage(senderId, { text: 'Error handling your postback.' }, pageAccessToken);
+  }
+};
+
+module.exports = { handlePostback };
